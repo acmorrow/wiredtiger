@@ -402,7 +402,7 @@ __wt_log_wrlsn(WT_SESSION_IMPL *session, uint32_t *slots_freed)
 {
 	WT_CONNECTION_IMPL *conn;
 	WT_LOG *log;
-	WT_LOG_WRLSN_ENTRY written[WT_SLOT_POOL];
+	WT_LOG_WRLSN_ENTRY written[WT_SLOT_POOL_MAX];
 	WT_LOGSLOT *coalescing, *slot;
 	size_t written_i;
 	uint32_t i, save_i, slot_freed;
@@ -419,7 +419,7 @@ __wt_log_wrlsn(WT_SESSION_IMPL *session, uint32_t *slots_freed)
 	 * Walk the array once saving any slots that are in the
 	 * WT_LOG_SLOT_WRITTEN state.
 	 */
-	while (i < WT_SLOT_POOL) {
+	while (i < log->pool_size) {
 		save_i = i;
 		slot = &log->slot_pool[i++];
 		if (slot->slot_state != WT_LOG_SLOT_WRITTEN)

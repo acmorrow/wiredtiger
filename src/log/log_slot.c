@@ -35,10 +35,11 @@ __wt_log_slot_init(WT_SESSION_IMPL *session)
 
 	conn = S2C(session);
 	log = conn->log;
-	for (i = 0; i < WT_SLOT_POOL; i++) {
+	for (i = 0; i < WT_SLOT_POOL_MAX; i++) {
 		log->slot_pool[i].slot_state = WT_LOG_SLOT_FREE;
 		log->slot_pool[i].slot_index = WT_SLOT_INVALID_INDEX;
 	}
+	log->pool_size = WT_SLOT_POOL_MIN;
 
 	/*
 	 * Set up the available slots from the pool the first time.
@@ -54,13 +55,13 @@ __wt_log_slot_init(WT_SESSION_IMPL *session)
 	 * Allocate memory for buffers now that the arrays are setup. Split
 	 * this out to make error handling simpler.
 	 */
-	for (i = 0; i < WT_SLOT_POOL; i++) {
+	for (i = 0; i < WT_SLOT_POOL_MAX; i++) {
 		WT_ERR(__wt_buf_init(session,
 		    &log->slot_pool[i].slot_buf, WT_LOG_SLOT_BUF_INIT_SIZE));
 		F_SET(&log->slot_pool[i], WT_SLOT_INIT_FLAGS);
 	}
 	WT_STAT_FAST_CONN_INCRV(session,
-	    log_buffer_size, WT_LOG_SLOT_BUF_INIT_SIZE * WT_SLOT_POOL);
+	    log_buffer_size, WT_LOG_SLOT_BUF_INIT_SIZE * WT_SLOT_POOL_MAX);
 	if (0) {
 err:		while (--i >= 0)
 			__wt_buf_free(session, &log->slot_pool[i].slot_buf);
@@ -82,7 +83,7 @@ __wt_log_slot_destroy(WT_SESSION_IMPL *session)
 	conn = S2C(session);
 	log = conn->log;
 
-	for (i = 0; i < WT_SLOT_POOL; i++)
+	for (i = 0; i < WT_SLOT_POOL_MAX; i++)
 		__wt_buf_free(session, &log->slot_pool[i].slot_buf);
 	return (0);
 }
@@ -206,7 +207,7 @@ retry:
 	 */
 	pool_i = log->pool_index;
 	newslot = &log->slot_pool[pool_i];
-	if (++log->pool_index >= WT_SLOT_POOL)
+	if (++log->pool_index >= log->pool_size)
 		log->pool_index = 0;
 	if (newslot->slot_state != WT_LOG_SLOT_FREE) {
 		WT_STAT_FAST_CONN_INCR(session, log_slot_switch_fails);
@@ -216,17 +217,32 @@ retry:
 		 * churn is used to change how long we pause before closing
 		 * the slot - which leads to more consolidation and less churn.
 		 */
-		if (++switch_fails % WT_SLOT_POOL == 0 && slot->slot_churn < 5)
+		if (++switch_fails % log->pool_size == 0 &&
+		    slot->slot_churn < 5)
 			++slot->slot_churn;
-		if (switch_fails % WT_SLOT_POOL == 0) {
+		if (switch_fails % log->pool_size == 0) {
 			/*
 			 * We looked through all slots, didn't find a free one.
 			 * Process written slots to see if we can free any.
-			 * Yield if that didn't generate any free ones.
+			 * If that didn't generate any free ones, then see if
+			 * we can release any additional slots into the pool.
+			 *
+			 * We want to have the slot pool remain as small as
+			 * possible because we walk and sort the slots a lot.
+			 * But in some workloads we end up with a lot of slots
+			 * in use and want additional available if needed.
 			 */
 			WT_RET(__wt_log_wrlsn(session, &slots_freed));
-			if (slots_freed == 0)
-				__wt_yield();
+			if (slots_freed == 0) {
+				if (log->pool_size == WT_SLOT_POOL_MAX)
+					__wt_yield();
+				else {
+					log->pool_index = log->pool_size;
+					log->pool_size = WT_MIN(
+					    log->pool_size * 2,
+					    WT_SLOT_POOL_MAX);
+				}
+			}
 		}
 		goto retry;
 	} else if (slot->slot_churn > 0) {
@@ -380,7 +396,7 @@ __wt_log_slot_grow_buffers(WT_SESSION_IMPL *session, size_t newsize)
 	 * a separate lock if there is contention.
 	 */
 	__wt_spin_lock(session, &log->log_slot_lock);
-	for (i = 0; i < WT_SLOT_POOL; i++) {
+	for (i = 0; i < log->pool_size; i++) {
 		slot = &log->slot_pool[i];
 
 		/* Don't keep growing unrelated buffers. */

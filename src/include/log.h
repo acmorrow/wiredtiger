@@ -152,16 +152,18 @@ typedef struct {
 
 	/*
 	 * Consolidation array information
-	 * WT_SLOT_ACTIVE must be less than WT_SLOT_POOL.
+	 * WT_SLOT_ACTIVE must be less than WT_SLOT_POOL_MAX.
 	 * Our testing shows that the more consolidation we generate the
 	 * better the performance we see which equates to an active slot
 	 * slot count of one.
 	 */
-#define	WT_SLOT_ACTIVE	1
-#define	WT_SLOT_POOL	16
+#define	WT_SLOT_ACTIVE		1
+#define	WT_SLOT_POOL_MAX	256
+#define	WT_SLOT_POOL_MIN	16
+	uint32_t	 pool_size;		/* Size of pool */
 	uint32_t	 pool_index;		/* Global pool index */
 	WT_LOGSLOT	*slot_array[WT_SLOT_ACTIVE];	/* Active slots */
-	WT_LOGSLOT	 slot_pool[WT_SLOT_POOL];	/* Pool of all slots */
+	WT_LOGSLOT	 slot_pool[WT_SLOT_POOL_MAX];	/* Pool of all slots */
 
 #define	WT_LOG_FORCE_CONSOLIDATE	0x01	/* Disable direct writes */
 	uint32_t	 flags;
