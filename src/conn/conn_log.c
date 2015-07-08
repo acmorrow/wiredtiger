@@ -398,30 +398,34 @@ typedef struct {
  *	freed in the progress arg.  Must be called with the log slot lock held.
  */
 int
-__wt_log_wrlsn(WT_SESSION_IMPL *session, uint32_t *slots_freed)
+__wt_log_wrlsn(WT_SESSION_IMPL *session, WT_LOGSLOT **free_slot)
 {
 	WT_CONNECTION_IMPL *conn;
 	WT_LOG *log;
 	WT_LOG_WRLSN_ENTRY written[WT_SLOT_POOL];
 	WT_LOGSLOT *coalescing, *slot;
 	size_t written_i;
-	uint32_t i, save_i, slot_freed;
+	uint32_t i, max_i, save_i;
 
 	conn = S2C(session);
 	log = conn->log;
 	coalescing = NULL;
 	written_i = 0;
-	if (slots_freed != NULL)
-		*slots_freed = 0;
-	i = slot_freed = 0;
+	if (free_slot != NULL)
+		*free_slot = NULL;
+	i = 0;
+	max_i = WT_MIN(log->max_used + 1, WT_SLOT_POOL - 1);
 
 	/*
 	 * Walk the array once saving any slots that are in the
 	 * WT_LOG_SLOT_WRITTEN state.
 	 */
-	while (i < WT_SLOT_POOL) {
+	while (i < max_i) {
 		save_i = i;
 		slot = &log->slot_pool[i++];
+		if (free_slot != NULL && *free_slot == NULL &&
+		    slot->slot_state == WT_LOG_SLOT_FREE)
+			*free_slot = slot;
 		if (slot->slot_state != WT_LOG_SLOT_WRITTEN)
 			continue;
 		written[written_i].slot_index = save_i;
@@ -489,11 +493,20 @@ __wt_log_wrlsn(WT_SESSION_IMPL *session, uint32_t *slots_freed)
 					    session, conn->log_file_cond));
 			}
 			WT_RET(__wt_log_slot_free(session, slot));
-			slot_freed++;
+			if (free_slot != NULL && *free_slot == NULL &&
+			    slot->slot_state == WT_LOG_SLOT_FREE)
+				*free_slot = slot;
 		}
 	}
-	if (slots_freed != NULL)
-		*slots_freed = slot_freed;
+	/*
+	 * Walk slots again to update max slot used.
+	 */
+	while (log->slot_pool[max_i].slot_state == WT_LOG_SLOT_FREE &&
+	    max_i > 0)
+		--max_i;
+	if (free_slot != NULL && *free_slot != NULL)
+		max_i = WT_MAX(*free_slot - log->slot_pool, max_i);
+	log->max_used = max_i;
 	return (0);
 }
 
