@@ -420,7 +420,7 @@ __wt_log_wrlsn(WT_SESSION_IMPL *session, WT_LOGSLOT **free_slot)
 	 * Walk the array once saving any slots that are in the
 	 * WT_LOG_SLOT_WRITTEN state.
 	 */
-	while (i < max_i) {
+	while (i <= max_i) {
 		save_i = i;
 		slot = &log->slot_pool[i++];
 		if (free_slot != NULL && *free_slot == NULL &&
